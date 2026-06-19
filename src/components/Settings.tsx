@@ -77,7 +77,7 @@ export default function Settings({
     }
   };
 
-  const compressPngImage = (base64Str: string, maxDim: number = 400): Promise<string> => {
+  const compressPngImage = (base64Str: string, maxDim: number = 240): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -99,6 +99,7 @@ export default function Settings({
         if (ctx) {
           ctx.clearRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
+          // Set PNG to use standard compression via Canvas engine
           resolve(canvas.toDataURL("image/png"));
         } else {
           resolve(base64Str);
@@ -127,14 +128,15 @@ export default function Settings({
     reader.onload = async () => {
       try {
         const rawBase64 = reader.result as string;
-        const compressedBase64 = await compressPngImage(rawBase64, 400);
+        // Limit max width/height dimension to 240px representing pristine visual clarity at extremely low storage
+        const compressedBase64 = await compressPngImage(rawBase64, 240);
         const localKey = "real_" + filename.replace(".", "_");
         localStorage.setItem(localKey, compressedBase64);
         setStatus("stored");
         setPreview(compressedBase64);
       } catch (err: any) {
         console.error("Failed to save image in local storage:", err);
-        alert(`ไม่สามารถบันทึกประวัติตามที่กำหนด: พื้นที่เก็บข้อมูลในบราวเซอร์เต็ม (Exceeded Storage Quota) กรุณาลบประวัติเพื่อเพิ่มพื้นที่ว่าง`);
+        alert(`ไม่สามารถบันทึกรูปภาพได้: พื้นที่เก็บข้อมูลในเบราว์เซอร์เต็ม (Exceeded Storage Quota) กรุณากดปุ่มล้างข้อมูลแคชและคิวบิลเก่าเพื่อเคลียร์พื้นที่ระดับสูงสุด`);
       }
     };
     reader.readAsDataURL(file);

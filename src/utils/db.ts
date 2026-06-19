@@ -198,7 +198,21 @@ export function getNotes(): DeliveryNote[] {
     return DEFAULT_NOTES;
   }
   try {
-    return JSON.parse(store);
+    const rawNotes: DeliveryNote[] = JSON.parse(store);
+    let dirty = false;
+    // Strip giant legacy base64 PDF URLs from storage records to free up browser quota instantly
+    const cleanedNotes = rawNotes.map(n => {
+      if (n.pdfUrl && (n.pdfUrl.startsWith("data:") || n.pdfUrl.length > 500)) {
+        dirty = true;
+        return { ...n, pdfUrl: undefined };
+      }
+      return n;
+    });
+
+    if (dirty) {
+      localStorage.setItem(NOTES_KEY, JSON.stringify(cleanedNotes));
+    }
+    return cleanedNotes;
   } catch (e) {
     return DEFAULT_NOTES;
   }
