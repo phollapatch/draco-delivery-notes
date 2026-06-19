@@ -1,0 +1,6 @@
+{
+  "name": "Delivery Note Management System",
+  "description": "A lightweight and fast delivery note manager with PDF printing, signature and stamp embedding, Excel databases, and Cloudflare Pages setup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

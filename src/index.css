@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Sarabun", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Base custom font import for Sarabun from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* Web Layout Fade In Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Hiding default Web Scrollbars in narrow tab layouts for cleanliness */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ==========================================================================
+   ENTERPRISE-GRADE BROWSER PRINT ENGINE STYLES (window.print() Overrides)
+   ========================================================================== */
+@media print {
+  html, body {
+    background: white !important;
+    color: black !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 11pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Override structural page breaks */
+  @page {
+    size: A4 portrait;
+    margin: 0mm !important; /* Managed custom paddings inside print-section container */
+  }
+
+  /* Deep nuclear hide of all administrative tab layouts & modals overlays */
+  body > div:not(#root) {
+    display: none !important;
+  }
+
+  #root {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide headers, footers, tab controls, action buttons completely */
+  header,
+  nav,
+  footer,
+  aside,
+  button,
+  input,
+  select,
+  textarea,
+  .print\:hidden {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Lift and enforce the print container as the sole visual item */
+  #print-section {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    padding: 12mm 15mm !important; /* Perfect physical margins on A4 paper */
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    visibility: visible !important;
+    z-index: 9999999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Enforce layouts components display rules within printing */
+  #print-section * {
+    visibility: visible !important;
+  }
+
+  #print-section .flex {
+    display: flex !important;
+  }
+
+  #print-section .grid {
+    display: grid !important;
+  }
+
+  #print-section table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #print-section tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+}

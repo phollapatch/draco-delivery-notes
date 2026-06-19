@@ -1,0 +1,15 @@
+# Wrangler Configuration for Cloudflare Pages Deployment
+name = "draco-delivery-notes"
+pages_build_output_dir = "dist"
+
+[vars]
+# Default Application URL (will be overwritten by cloudflare runtime or .env)
+APP_URL = "https://draco-delivery.pages.dev"
+# Toggle mock R2 uploads (set to false in production to force real workers binding)
+MOCK_R2_STORAGE = "true"
+
+# Define the R2 Storage Bucket Binding for PDF Delivery Notes
+[[r2_buckets]]
+binding = "DRACO_PDF_BUCKET"
+bucket_name = "draco-delivery-notes-pdfs"
+preview_bucket_name = "draco-delivery-notes-pdfs-preview"
