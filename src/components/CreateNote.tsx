@@ -4,6 +4,7 @@ import { generateNextDocNo } from "../utils/db";
 import { Search, UserCheck, Plus, Trash2, Calendar, FileText, Percent, ShieldCheck } from "lucide-react";
 
 interface CreateNoteProps {
+  key?: any;
   customers: Customer[];
   products: Product[];
   onGenerate: (note: DeliveryNote) => void;
@@ -119,6 +120,31 @@ export default function CreateNote({ customers, products, onGenerate }: CreateNo
   // Math totals calculation
   const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
   const netAmount = Math.max(0, totalAmount - discount);
+
+  const handleResetForm = () => {
+    setSelectedDate(new Date().toISOString().split("T")[0]);
+    setReference("PO/B");
+    setRemarks("ส่งของเรียบร้อยแล้ว\nฝากขาย");
+    setDiscount(0);
+    setCustSearch("");
+    if (customers.length > 0) {
+      setCustomerSelected(customers[0]);
+    } else {
+      setCustomerSelected(null);
+    }
+    setItems([
+      {
+        no: 1,
+        productId: "PROD-MX4",
+        productName: "Draco MX 4 cap.",
+        qty: 10,
+        unit: "กล่อง",
+        unitPrice: 290.00,
+        amount: 2900.00,
+        note: ""
+      }
+    ]);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -435,13 +461,21 @@ export default function CreateNote({ customers, products, onGenerate }: CreateNo
         </div>
 
         {/* FAST INVOICE GEN ACTION BUTTON */}
-        <div className="pt-2">
+        <div className="pt-2 grid grid-cols-1 sm:grid-cols-4 gap-3">
           <button
             type="submit"
-            className="w-full py-4.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-black tracking-wide text-base sm:text-lg rounded-2xl cursor-pointer shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 transition transform active:scale-98"
+            className="sm:col-span-3 py-4.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-black tracking-wide text-base rounded-2xl cursor-pointer shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 transition transform active:scale-98"
           >
             <ShieldCheck className="w-5.5 h-5.5" />
             ตกลงสร้างใบส่งของทันที (Generate Delivery Note in &lt; 30s)
+          </button>
+          
+          <button
+            type="button"
+            onClick={handleResetForm}
+            className="py-4.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded-2xl cursor-pointer flex items-center justify-center gap-1 transition"
+          >
+            ล้างฟอร์ม / เริ่มใหม่
           </button>
         </div>
       </form>

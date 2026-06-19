@@ -1,19 +1,106 @@
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { DeliveryNote } from "../types";
 import { bahttext } from "./bahttext";
 import { REPRESENTATIVE_NAME, getAssetUrl } from "./assets";
 
+// Global cache for TrueType font files to avoid reloading over network
+let cachedSarabunRegular: ArrayBuffer | null = null;
+let cachedSarabunBold: ArrayBuffer | null = null;
+
 /**
- * 100% Reliable HTML-to-PDF delivery note builder.
- * Solves Thai character positioning, combining marks, vowel stacking, and spacing issues
- * completely by rendering the document natively in the browser's layout engine first, 
- * capturing it with high-precision html2canvas, and packaging it into a crisp PDF.
+ * Loads and caches the Thai Sarabun fonts from CDN.
+ */
+async function loadSarabunFonts(): Promise<{ regular: ArrayBuffer; bold: ArrayBuffer }> {
+  if (cachedSarabunRegular && cachedSarabunBold) {
+    return { regular: cachedSarabunRegular, bold: cachedSarabunBold };
+  }
+  const [regRes, boldRes] = await Promise.all([
+    fetch("https://cdn.jsdelivr.net/gh/google/fonts@master/ofl/sarabun/Sarabun-Regular.ttf"),
+    fetch("https://cdn.jsdelivr.net/gh/google/fonts@master/ofl/sarabun/Sarabun-Bold.ttf")
+  ]);
+
+  if (!regRes.ok || !boldRes.ok) {
+    throw new Error("Failed to load Sarabun font files from CDN.");
+  }
+
+  cachedSarabunRegular = await regRes.arrayBuffer();
+  cachedSarabunBold = await boldRes.arrayBuffer();
+
+  return { regular: cachedSarabunRegular, bold: cachedSarabunBold };
+}
+
+/**
+ * Robust helper to fetch and decode image bytes from data URLs or standard HTTP URLs.
+ */
+async function fetchImageBytes(url: string): Promise<Uint8Array> {
+  if (url.startsWith("data:")) {
+    const arr = url.split(",");
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return u8arr;
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.statusText}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
+/**
+ * Draw Thai Text precisely with alignment and normalization support without letter-spacing or squeeze.
+ */
+function drawThaiText(
+  page: any,
+  text: string,
+  options: {
+    x: number;
+    y: number; // PDF standard Y (from bottom)
+    size: number;
+    font: any;
+    color?: any;
+    maxWidth?: number;
+    align?: "left" | "right" | "center";
+  }
+) {
+  const normalized = (text || "").normalize("NFC");
+  const size = options.size || 10;
+  const font = options.font;
+  const color = options.color || rgb(0.09, 0.09, 0.09);
+  const align = options.align || "left";
+
+  let drawX = options.x;
+  const textWidth = font.widthOfTextAtSize(normalized, size);
+
+  if (align === "right") {
+    drawX = options.x - textWidth;
+  } else if (align === "center") {
+    drawX = options.x - (textWidth / 2);
+  }
+
+  page.drawText(normalized, {
+    x: drawX,
+    y: options.y,
+    size,
+    font,
+    color,
+    maxWidth: options.maxWidth,
+  });
+}
+
+/**
+ * 100% Vector Native PDF builder using pdf-lib.
+ * Ensures incredible crispness, correct aspect ratios, and precise alignments.
  */
 export async function generateDeliveryNotePdf(note: DeliveryNote): Promise<Uint8Array> {
   const customBahtText = bahttext(note.netAmount);
 
-  // Format Date to DD.MM.YY (e.g. 17.06.69)
+  // Format Date to DD.MM.YY (e.g. 19.06.26)
   const formatDocumentDate = (dateStr: string) => {
     try {
       const d = new Date(dateStr);
@@ -27,281 +114,711 @@ export async function generateDeliveryNotePdf(note: DeliveryNote): Promise<Uint8
     }
   };
 
-  // Create an off-screen container for rendering the A4 sheet
-  const container = document.createElement("div");
-  container.style.position = "fixed";
-  container.style.top = "-9999px";
-  container.style.left = "-9999px";
-  container.style.width = "794px"; // 210mm at 96 DPI
-  container.style.minHeight = "1123px"; // 297mm at 96 DPI
-  container.style.padding = "48px";
-  container.style.boxSizing = "border-box";
-  container.style.backgroundColor = "#ffffff";
-  container.style.color = "#0a0a0a";
-  container.style.fontFamily = "'Sarabun', 'Inter', sans-serif";
-  container.style.display = "flex";
-  container.style.flexDirection = "column";
-  container.style.justifyContent = "space-between";
+  // 1. Create a pristine A4 landscape/portrait PDF Document
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
 
-  // Build the items ledger table HTML
-  let itemRowsHtml = "";
-  for (let i = 0; i < 9; i++) {
-    const item = note.items[i];
-    itemRowsHtml += `
-      <tr style="height: 36px; border-bottom: 1px dotted #a8a29e;">
-        <td style="text-align: center; border-right: 1px solid #d6d3d1; font-family: monospace; color: #78716c;">
-          ${item ? i + 1 : ""}
-        </td>
-        <td style="text-align: center; border-right: 1px solid #d6d3d1; font-family: monospace; font-size: 11px; color: #57534e;">
-          ${item ? item.productId.replace("PROD-", "") : ""}
-        </td>
-        <td style="padding: 0 12px; border-right: 1px solid #d6d3d1; color: #1c1917; vertical-align: middle;">
-          ${item ? `
-            <div style="display: flex; flex-direction: column; justify-content: center; line-height: 1.25;">
-              <span style="font-weight: bold; color: #171717;">${item.productName.normalize("NFC")}</span>
-              ${item.note ? `<span style="font-size: 11px; font-style: italic; color: #78716c; font-weight: 500;">${item.note.normalize("NFC")}</span>` : ""}
-            </div>
-          ` : ""}
-        </td>
-        <td style="text-align: center; border-right: 1px solid #d6d3d1; font-family: monospace; font-weight: bold; color: #171717;">
-          ${item ? item.qty : ""}
-        </td>
-        <td style="text-align: center; border-right: 1px solid #d6d3d1; color: #262626;">
-          ${item ? item.unit.normalize("NFC") : ""}
-        </td>
-        <td style="text-align: right; padding-right: 12px; border-right: 1px solid #d6d3d1; font-family: monospace; color: #44403c;">
-          ${item ? (item.unitPrice === 0 ? "0.00" : item.unitPrice.toFixed(2)) : ""}
-        </td>
-        <td style="text-align: right; padding-right: 12px; font-family: monospace; font-weight: 600; color: #171717;">
-          ${item ? (item.amount === 0 ? "0.00" : item.amount.toFixed(2)) : ""}
-        </td>
-      </tr>
-    `;
-  }
-
-  // Set HTML template matching the print preview visual layout identically
-  container.innerHTML = `
-    <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between;">
-      <div>
-        <!-- 1. Header Row -->
-        <div style="display: flex; align-items: start; gap: 24px; padding-bottom: 24px;">
-          <div style="width: 80px; height: 112px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
-            <img src="${getAssetUrl("logo.png")}" style="width: 100%; height: 100%; object-fit: contain;" />
-          </div>
-          <div style="text-align: left; padding-top: 8px; flex-grow: 1;">
-            <h1 style="font-size: 24px; font-weight: 900; letter-spacing: -0.025em; color: #171717; margin: 0 0 4px 0; line-height: 1;">
-              บริษัท บันนี่ คอร์ป จำกัด
-            </h1>
-            <p style="font-size: 14px; font-weight: 500; color: #525252; margin: 0 0 2px 0;">
-              1323 / 1 ซอยลาดพร้าว 94 (ปัญจมิตร) แขวงพลับพลา
-            </p>
-            <p style="font-size: 14px; font-weight: 500; color: #525252; margin: 0; line-height: 1;">
-              เขตวังทองหลาง กรุงเทพฯ 10310
-            </p>
-          </div>
-        </div>
-
-        <!-- Title Area -->
-        <div style="text-align: center; padding-top: 8px; padding-bottom: 24px;">
-          <h2 style="font-size: 24px; font-weight: 800; letter-spacing: 0.025em; color: #171717; display: inline-block; border-bottom: 2px solid #171717; padding-bottom: 4px; margin: 0;">
-            ใบส่งสินค้า
-          </h2>
-        </div>
-
-        <!-- 2. Customer & Document Blocks -->
-        <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; padding-bottom: 32px; font-size: 14px;">
-          <!-- Customer Box -->
-          <div style="grid-column: span 7; border: 1px solid #78716c; padding: 16px; border-radius: 4px; text-align: left; display: flex; flex-direction: column; justify-content: start; min-height: 110px; box-sizing: border-box;">
-            <div style="margin-bottom: 4px;">
-              <span style="font-weight: bold; text-decoration: underline;">ลูกค้า :</span>
-              <span style="font-weight: 600; color: #171717;">${note.customerName.normalize("NFC")}</span>
-            </div>
-            <div style="margin-bottom: 8px; flex-grow: 1;">
-              <span style="font-weight: bold;">ที่อยู่ :</span>
-              <span style="color: #404040; white-space: pre-line; line-height: 1.5;">${note.address.normalize("NFC")}</span>
-            </div>
-            <div style="padding-top: 4px; border-top: 1px dotted #d6d3d1;">
-              <span style="font-weight: bold;">T.</span> ${note.phone}
-            </div>
-          </div>
-
-          <!-- Document stats -->
-          <div style="grid-column: span 5; border: 1px solid #78716c; border-radius: 4px; display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); text-align: left; min-height: 110px; box-sizing: border-box;">
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #78716c; align-items: center; padding: 0 12px;">
-              <span style="grid-column: span 4; font-weight: bold;">เลขที่ :</span>
-              <span style="grid-column: span 8; font-weight: 800; color: #171717; font-size: 16px;">${note.documentNo}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #78716c; align-items: center; padding: 0 12px;">
-              <span style="grid-column: span 4; font-weight: bold;">วันที่ :</span>
-              <span style="grid-column: span 8; font-weight: 600; color: #262626;">${formatDocumentDate(note.date)}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #78716c; align-items: center; padding: 0 12px;">
-              <span style="grid-column: span 4; font-weight: bold; font-size: 12px; line-height: 1;">อ้างอิง :</span>
-              <span style="grid-column: span 8; font-weight: 500; color: #404040;">${note.reference ? note.reference.normalize("NFC") : "PO/B"}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: center; padding: 0 12px; color: #a3a3a3; font-size: 12px;">
-              <span></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 3. Items Ledger Grid Table -->
-        <div style="border: 1px solid #78716c; border-radius: 4px; overflow: hidden; box-sizing: border-box;">
-          <table style="width: 100%; table-layout: fixed; font-size: 14px; border-collapse: collapse; text-align: left;">
-            <thead>
-              <tr style="background-color: #f5f5f4; border-bottom: 1px solid #78716c; color: #262626; font-weight: bold; height: 40px;">
-                <th style="width: 6%; text-align: center; border-right: 1px solid #d6d3d1;">ลำดับ</th>
-                <th style="width: 14%; text-align: center; border-right: 1px solid #d6d3d1;">รหัสสินค้า</th>
-                <th style="width: 36%; padding: 0 12px; border-right: 1px solid #d6d3d1;">รายการ</th>
-                <th style="width: 10%; text-align: center; border-right: 1px solid #d6d3d1;">จำนวน</th>
-                <th style="width: 10%; text-align: center; border-right: 1px solid #d6d3d1;">หน่วยนับ</th>
-                <th style="width: 11%; text-align: right; padding-right: 12px; border-right: 1px solid #d6d3d1;">หน่วยละ</th>
-                <th style="width: 13%; text-align: right; padding-right: 12px;">จำนวนเงิน</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemRowsHtml}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- 4. TOTAL CALCULATIONS BLOCK -->
-        <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border: 1px solid #78716c; border-top: 0; border-radius: 0 0 4px 4px; font-size: 14px; overflow: hidden; min-height: 96px; box-sizing: border-box;">
-          <!-- Thai Baht text in Gray block on left -->
-          <div style="grid-column: span 7; background-color: #f5f5f4; padding: 16px; display: flex; align-items: center; justify-content: center; border-right: 1px solid #78716c; position: relative;">
-            <span style="color: #a8a29e; position: absolute; font-size: 12px; left: 8px; top: 8px; font-family: monospace;">บาทตัวอักษร</span>
-            <span style="font-weight: 900; color: #171717; font-size: 16px; text-decoration: underline; text-decoration-style: double;">
-              ${customBahtText}
-            </span>
-          </div>
-
-          <!-- Calculations lines on right -->
-          <div style="grid-column: span 5; display: grid; grid-template-rows: repeat(4, minmax(0, 1fr)); box-sizing: border-box;">
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #e7e5e4; align-items: center; padding: 0 16px;">
-              <span style="grid-column: span 7; font-weight: bold; color: #44403c;">รวมเงิน</span>
-              <span style="grid-column: span 5; text-align: right; font-family: monospace; color: #171717;">${note.totalAmount.toFixed(2)}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #e7e5e4; align-items: center; padding: 0 16px;">
-              <span style="grid-column: span 7; font-weight: 500; color: #78716c;">ส่วนลด</span>
-              <span style="grid-column: span 5; text-align: right; font-family: monospace; color: #78716c;">
-                ${note.discount > 0 ? note.discount.toFixed(2) : "-"}
-              </span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border-bottom: 1px solid #e7e5e4; align-items: center; padding: 0 16px;">
-              <span style="grid-column: span 7; font-size: 12px; font-weight: 500; color: #57534e;">ยอดหลังหักส่วนลด</span>
-              <span style="grid-column: span 5; text-align: right; font-family: monospace; color: #525252;">${(note.totalAmount - note.discount).toFixed(2)}</span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); background-color: #fafaf9; align-items: center; padding: 0 16px; font-size: 16px; font-weight: 900; color: #171717;">
-              <span style="grid-column: span 7;">ยอดสุทธิ</span>
-              <span style="grid-column: span 5; text-align: right; font-family: monospace; text-decoration: underline; text-decoration-style: double;">${note.netAmount.toFixed(2)}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Remarks display under calculated box -->
-        <div style="text-align: left; margin-top: 16px; font-size: 14px; max-width: 512px; margin-bottom: 32px;">
-          <span style="font-weight: bold; color: #292524;">หมายเหตุ: </span>
-          <span style="color: #57534e; font-weight: 500; white-space: pre-line; line-height: 1.5;">${(note.remarks || "ส่งของเรียบร้อยแล้ว\nฝากขาย").normalize("NFC")}</span>
-        </div>
-      </div>
-
-      <!-- 5. FOOTER ASSIGNMENTS & SIGNATURE STAMP OVERLAYS -->
-      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; font-size: 14px; margin-top: auto; padding-top: 16px; box-sizing: border-box;">
-        <!-- Receiver Area -->
-        <div style="border: 1px solid #78716c; padding: 16px; border-radius: 4px; text-align: center; position: relative; display: flex; flex-direction: column; justify-content: space-between; height: 160px; background-color: rgba(255, 255, 255, 0.5); box-sizing: border-box;">
-          <span style="font-weight: 800; color: #292524; text-decoration: underline;">ผู้รับสินค้า</span>
-          <div style="border-top: 1px dotted #78716c; margin: 64px 16px 0 16px;"></div>
-          <div style="display: flex; justify-content: space-between; padding: 8px 24px 0 24px; font-size: 12px; color: #78716c; font-family: monospace;">
-            <span>(........................................................)</span>
-            <span>วันที่ ......./......./.......</span>
-          </div>
-        </div>
-
-        <!-- Sender Area with Stamp & Signature -->
-        <div style="border: 1px solid #78716c; padding: 16px; border-radius: 4px; text-align: center; position: relative; display: flex; flex-direction: column; justify-content: space-between; height: 160px; background-color: rgba(255, 255, 255, 0.5); box-sizing: border-box; overflow: visible;">
-          <span style="font-weight: 800; color: #292524; text-decoration: underline; pointer-events: none; z-index: 1;">ผู้ส่งสินค้า</span>
-          
-          <!-- SIGNATURE OVERLAY (Directly above the printed name) -->
-          <div style="position: absolute; left: 0; right: 0; top: 32px; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10;">
-            <div style="width: 192px; height: 64px; opacity: 0.9; transform: rotate(-2deg); display: flex; align-items: center; justify-content: center;">
-              <img src="${getAssetUrl("signature.png")}" style="width: 100%; height: 100%; object-fit: contain;" />
-            </div>
-          </div>
-
-          <!-- Representative Printed Name Label -->
-          <div style="z-index: 20; padding-top: 64px; pointer-events: none;">
-            <span style="font-size: 12px; color: #171717; font-weight: 800; font-family: sans-serif;">
-              (..... ${REPRESENTATIVE_NAME} .....)
-            </span>
-          </div>
-
-          <!-- COMPANY RUBBER BLUE STAMP OVERLAY (Stamped BELOW the name on the right side) -->
-          <div style="position: absolute; right: 8px; bottom: 4px; pointer-events: none; z-index: 30; display: flex; align-items: center; justify-content: center;">
-            <div style="width: 144px; height: 48px; opacity: 0.85; transform: rotate(4deg);">
-              <img src="${getAssetUrl("company-stamp.png")}" style="width: 100%; height: 100%; object-fit: contain;" />
-            </div>
-          </div>
-
-          <div style="display: flex; justify-content: center; padding: 0 24px; font-size: 12px; color: #78716c; font-family: monospace; z-index: 20;">
-            <span>วันที่ ......./......./.......</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(container);
-
+  // 2. Embed custom fonts or fallback to standard TrueType fonts
+  let regularFont: any;
+  let boldFont: any;
   try {
-    // Wait for all embedded images inside the container to load completely
-    const images = Array.from(container.querySelectorAll("img"));
-    await Promise.all(
-      images.map(
-        (img) =>
-          new Promise<void>((resolve) => {
-            if (img.complete) {
-              resolve();
-            } else {
-              img.onload = () => resolve();
-              img.onerror = () => resolve();
-            }
-          })
-      )
-    );
+    const fonts = await loadSarabunFonts();
+    regularFont = await pdfDoc.embedFont(fonts.regular);
+    boldFont = await pdfDoc.embedFont(fonts.bold);
+  } catch (err) {
+    console.warn("Could not load Sarabun. Falling back to Helvetica...", err);
+    regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  }
 
-    // Wait for Web Fonts to be fully compiled and active in layout
-    if (document.fonts) {
-      await document.fonts.ready;
-    }
+  const page = pdfDoc.addPage([595.28, 841.89]); // Standard A4 Dimensions
 
-    // Capture the generated element nicely using html2canvas 2x high fidelity rendering
-    const canvas = await html2canvas(container, {
-      scale: 2, // High resolution crisp density
-      useCORS: true,
-      logging: false,
-      backgroundColor: "#ffffff",
+  // Helper coordinate converter for Y axis (moving origin from Bottom-Left to Top-Left)
+  const convertY = (yFromTop: number) => 841.89 - yFromTop;
+
+  // Helper to obtain perfect vertical center baseline for text inside cells
+  const getVerticalCenterY = (rowTop: number, rowHeight: number, fontSize: number) => {
+    return convertY(rowTop + rowHeight / 2) - (fontSize / 2) + 2;
+  };
+
+  const stoneMainBorderColor = rgb(0.47, 0.44, 0.42); // #78716c
+  const stoneLightDividerColor = rgb(0.66, 0.64, 0.62); // #a8a29e
+
+  // --- HEADER SECTION ---
+  // Logo placeholder & contain fit drawing
+  try {
+    const logoUrl = getAssetUrl("logo.png");
+    const logoBytes = await fetchImageBytes(logoUrl);
+    const logoImg = await pdfDoc.embedPng(logoBytes);
+    const { width: origW, height: origH } = logoImg.scale(1);
+    const maxW = 60;
+    const maxH = 75;
+    const scale = Math.min(maxW / origW, maxH / origH);
+    const w = origW * scale;
+    const h = origH * scale;
+
+    const centerY = 40 + (75 - h) / 2;
+    page.drawImage(logoImg, {
+      x: 40,
+      y: convertY(centerY + h),
+      width: w,
+      height: h,
+    });
+  } catch (err) {
+    console.warn("Skipped logo draw:", err);
+  }
+
+  // Company texts adjacent to Logo
+  drawThaiText(page, "บริษัท บันนี่ คอร์ป จำกัด", {
+    x: 115,
+    y: convertY(54),
+    size: 17,
+    font: boldFont,
+    color: rgb(0.09, 0.09, 0.09),
+  });
+  drawThaiText(page, "1323 / 1 ซอยลาดพร้าว 94 (ปัญจมิตร) แขวงพลับพลา", {
+    x: 115,
+    y: convertY(72),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.32, 0.32, 0.32),
+  });
+  drawThaiText(page, "เขตวังทองหลาง กรุงเทพฯ 10310", {
+    x: 115,
+    y: convertY(86),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.32, 0.32, 0.32),
+  });
+
+  // --- DOCUMENT HEADER ("ใบส่งสินค้า") ---
+  drawThaiText(page, "ใบส่งสินค้า", {
+    x: 297.64,
+    y: convertY(122),
+    size: 18,
+    font: boldFont,
+    color: rgb(0.09, 0.09, 0.09),
+    align: "center",
+  });
+  // Double bottom aesthetic thick border
+  page.drawLine({
+    start: { x: 247.64, y: convertY(131) },
+    end: { x: 347.64, y: convertY(131) },
+    thickness: 1.5,
+    color: rgb(0.09, 0.09, 0.09),
+  });
+
+  // --- CUSTOMER BOX (Left) ---
+  page.drawRectangle({
+    x: 40,
+    y: convertY(246),
+    width: 280,
+    height: 96,
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  drawThaiText(page, "ลูกค้า :", {
+    x: 50,
+    y: convertY(166),
+    size: 10,
+    font: boldFont,
+  });
+  // Draw underline for Customer word
+  page.drawLine({
+    start: { x: 50, y: convertY(168) },
+    end: { x: 74, y: convertY(168) },
+    thickness: 0.5,
+    color: rgb(0.09, 0.09, 0.09),
+  });
+
+  drawThaiText(page, note.customerName, {
+    x: 82,
+    y: convertY(166),
+    size: 11,
+    font: boldFont,
+    color: rgb(0.09, 0.09, 0.09),
+  });
+
+  drawThaiText(page, "ที่อยู่ :", {
+    x: 50,
+    y: convertY(186),
+    size: 10,
+    font: boldFont,
+  });
+
+  // Multi-line address wrapping
+  const addressLines = (note.address || "").split("\n");
+  addressLines.forEach((line, idx) => {
+    drawThaiText(page, line, {
+      x: 82,
+      y: convertY(186 + idx * 14),
+      size: 10,
+      font: regularFont,
+      color: rgb(0.24, 0.24, 0.24),
+    });
+  });
+
+  // Small dotted separator inside left box
+  page.drawLine({
+    start: { x: 50, y: convertY(225) },
+    end: { x: 310, y: convertY(225) },
+    thickness: 0.5,
+    color: stoneLightDividerColor,
+    dashArray: [2, 2],
+  });
+
+  drawThaiText(page, "T.", {
+    x: 50,
+    y: convertY(237),
+    size: 10,
+    font: boldFont,
+  });
+  drawThaiText(page, note.phone, {
+    x: 64,
+    y: convertY(237),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.15, 0.15, 0.15),
+  });
+
+  // --- DOCUMENT STATS BOX (Right) ---
+  page.drawRectangle({
+    x: 335,
+    y: convertY(246),
+    width: 220.28,
+    height: 96,
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  // 4 rows horizontal divisions
+  for (let r = 1; r < 4; r++) {
+    const lineY = 150 + r * 24;
+    page.drawLine({
+      start: { x: 335, y: convertY(lineY) },
+      end: { x: 555.28, y: convertY(lineY) },
+      thickness: 0.75,
+      color: stoneMainBorderColor,
+    });
+  }
+
+  // Row 1: Document ID
+  drawThaiText(page, "เลขที่ :", {
+    x: 345,
+    y: getVerticalCenterY(150, 24, 10),
+    size: 10,
+    font: boldFont,
+  });
+  drawThaiText(page, note.documentNo, {
+    x: 545.28,
+    y: getVerticalCenterY(150, 24, 12),
+    size: 12,
+    font: boldFont,
+    color: rgb(0.09, 0.09, 0.09),
+    align: "right",
+  });
+
+  // Row 2: Date
+  drawThaiText(page, "วันที่ :", {
+    x: 345,
+    y: getVerticalCenterY(174, 24, 10),
+    size: 10,
+    font: boldFont,
+  });
+  drawThaiText(page, formatDocumentDate(note.date), {
+    x: 545.28,
+    y: getVerticalCenterY(174, 24, 11),
+    size: 11,
+    font: boldFont,
+    align: "right",
+  });
+
+  // Row 3: Reference
+  drawThaiText(page, "อ้างอิง :", {
+    x: 345,
+    y: getVerticalCenterY(198, 24, 10),
+    size: 10,
+    font: boldFont,
+  });
+  drawThaiText(page, note.reference || "PO/B", {
+    x: 545.28,
+    y: getVerticalCenterY(198, 24, 10),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.24, 0.24, 0.24),
+    align: "right",
+  });
+
+  // --- PRODUCTS LEDGER TABLE ---
+  page.drawRectangle({
+    x: 40,
+    y: convertY(500),
+    width: 515.28,
+    height: 240,
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  // Table header background fill
+  page.drawRectangle({
+    x: 40,
+    y: convertY(284),
+    width: 515.28,
+    height: 24,
+    color: rgb(0.96, 0.96, 0.95),
+  });
+
+  // Draw header divider
+  page.drawLine({
+    start: { x: 40, y: convertY(284) },
+    end: { x: 555.28, y: convertY(284) },
+    thickness: 0.75,
+    color: stoneMainBorderColor,
+  });
+
+  // Relative column width setups
+  const colLefts = [40, 70, 140, 335, 380, 430, 490];
+  const colCenters = [55, 105, 150, 357.5, 405, 482, 547.28]; // centers / aligned anchor values
+
+  // Header texts
+  const headers = [
+    { text: "ลำดับ", x: 55, align: "center" as const },
+    { text: "รหัสสินค้า", x: 105, align: "center" as const },
+    { text: "รายการ", x: 147, align: "left" as const },
+    { text: "จำนวน", x: 357.5, align: "center" as const },
+    { text: "หน่วยนับ", x: 405, align: "center" as const },
+    { text: "หน่วยละ", x: 482, align: "right" as const },
+    { text: "จำนวนเงิน", x: 547.28, align: "right" as const }
+  ];
+
+  const headerValY = getVerticalCenterY(260, 24, 10);
+  headers.forEach((hInfo) => {
+    drawThaiText(page, hInfo.text, {
+      x: hInfo.x,
+      y: headerValY,
+      size: 10,
+      font: boldFont,
+      align: hInfo.align,
+    });
+  });
+
+  // Vertical grid dividers
+  const vertDividers = [70, 140, 335, 380, 430, 490];
+  vertDividers.forEach((divX) => {
+    page.drawLine({
+      start: { x: divX, y: convertY(260) },
+      end: { x: divX, y: convertY(500) },
+      thickness: 0.5,
+      color: stoneLightDividerColor,
+    });
+  });
+
+  // 9 record rows rendering
+  for (let i = 0; i < 9; i++) {
+    const rowTop = 284 + i * 24;
+    const rowBottom = rowTop + 24;
+
+    // Row border divider
+    page.drawLine({
+      start: { x: 40, y: convertY(rowBottom) },
+      end: { x: 555.28, y: convertY(rowBottom) },
+      thickness: 0.5,
+      color: stoneLightDividerColor,
     });
 
-    // Create jsPDF document mapping exactly to an A4 portrait canvas (Unit pt, format: a4)
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "pt",
-      format: "a4",
-    });
+    const item = note.items[i];
+    const itemValY = getVerticalCenterY(rowTop, 24, 10);
 
-    // Obtain compressed jpeg representation of the canvas
-    const imgData = canvas.toDataURL("image/jpeg", 0.95);
+    if (item) {
+      // 0. No
+      drawThaiText(page, (i + 1).toString(), {
+        x: 55,
+        y: itemValY,
+        size: 10,
+        font: regularFont,
+        align: "center",
+      });
 
-    // Place the rasterized page at coordinates 0,0 fitting exactly to A4 boundaries (595.28 x 841.89 points)
-    pdf.addImage(imgData, "JPEG", 0, 0, 595.28, 841.89, undefined, "FAST");
+      // 1. Code (clean product code format)
+      const formattedCode = item.productId.replace("PROD-", "");
+      drawThaiText(page, formattedCode, {
+        x: 105,
+        y: itemValY,
+        size: 9,
+        font: regularFont,
+        align: "center",
+      });
 
-    // Retrieve ArrayBuffer payload elements
-    const pdfBuffer = pdf.output("arraybuffer");
-    return new Uint8Array(pdfBuffer);
-  } finally {
-    // Always clean up DOM and tear down the off-screen sandbox elements safely
-    if (container.parentNode) {
-      container.parentNode.removeChild(container);
+      // 2. Name & notes handling elegantly centered
+      if (item.note) {
+        const nameY = getVerticalCenterY(rowTop, 24, 9) + 4.5;
+        const noteY = getVerticalCenterY(rowTop, 24, 8) - 5;
+        drawThaiText(page, item.productName, {
+          x: 147,
+          y: nameY,
+          size: 9,
+          font: boldFont,
+        });
+        drawThaiText(page, item.note, {
+          x: 147,
+          y: noteY,
+          size: 8,
+          font: regularFont,
+          color: rgb(0.47, 0.44, 0.42),
+        });
+      } else {
+        drawThaiText(page, item.productName, {
+          x: 147,
+          y: itemValY,
+          size: 10,
+          font: boldFont,
+        });
+      }
+
+      // 3. Qty
+      drawThaiText(page, item.qty.toString(), {
+        x: 357.5,
+        y: itemValY,
+        size: 10,
+        font: boldFont,
+        align: "center",
+      });
+
+      // 4. Unit
+      drawThaiText(page, item.unit, {
+        x: 405,
+        y: itemValY,
+        size: 10,
+        font: regularFont,
+        align: "center",
+      });
+
+      // 5. Unit Price
+      const priceStr = item.unitPrice === 0 ? "0.00" : item.unitPrice.toFixed(2);
+      drawThaiText(page, priceStr, {
+        x: 482,
+        y: itemValY,
+        size: 10,
+        font: regularFont,
+        align: "right",
+      });
+
+      // 6. Total Amount
+      const amtStr = item.amount === 0 ? "0.00" : item.amount.toFixed(2);
+      drawThaiText(page, amtStr, {
+        x: 547.28,
+        y: itemValY,
+        size: 10,
+        font: boldFont,
+        align: "right",
+      });
     }
   }
+
+  // --- TOTAL ESTIMATIONS AREA ---
+  // Left Thai Baht block background
+  page.drawRectangle({
+    x: 40,
+    y: convertY(596),
+    width: 295,
+    height: 96,
+    color: rgb(0.96, 0.96, 0.95),
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  drawThaiText(page, "บาทตัวอักษร", {
+    x: 48,
+    y: convertY(514),
+    size: 8,
+    font: regularFont,
+    color: rgb(0.47, 0.44, 0.42),
+  });
+
+  // Dynamic Baht text display
+  drawThaiText(page, customBahtText, {
+    x: 187.5,
+    y: convertY(554),
+    size: 13,
+    font: boldFont,
+    align: "center",
+  });
+
+  // Precise underlying double lines for Bahttext
+  const bTextNorm = customBahtText.normalize("NFC");
+  const bTextW = boldFont.widthOfTextAtSize(bTextNorm, 13);
+  const btStart = 187.5 - bTextW / 2;
+  const btEnd = 187.5 + bTextW / 2;
+
+  page.drawLine({ start: { x: btStart, y: convertY(560) }, end: { x: btEnd, y: convertY(560) }, thickness: 0.75, color: rgb(0.1, 0.1, 0.1) });
+  page.drawLine({ start: { x: btStart, y: convertY(562) }, end: { x: btEnd, y: convertY(562) }, thickness: 0.75, color: rgb(0.1, 0.1, 0.1) });
+
+  // Right Calculations Box boundaries
+  // Divider bounds line separating right and left box
+  page.drawLine({
+    start: { x: 335, y: convertY(500) },
+    end: { x: 335, y: convertY(596) },
+    thickness: 0.75,
+    color: stoneMainBorderColor,
+  });
+
+  // Row boundaries lines
+  for (let r = 1; r < 4; r++) {
+    const dividerY = 500 + r * 24;
+    page.drawLine({
+      start: { x: 335, y: convertY(dividerY) },
+      end: { x: 555.28, y: convertY(dividerY) },
+      thickness: 0.5,
+      color: stoneLightDividerColor,
+    });
+  }
+
+  // Row 1: Subtotal
+  drawThaiText(page, "รวมเงิน", {
+    x: 345,
+    y: getVerticalCenterY(500, 24, 10),
+    size: 10,
+    font: boldFont,
+    color: rgb(0.24, 0.24, 0.24),
+  });
+  drawThaiText(page, note.totalAmount.toFixed(2), {
+    x: 545.28,
+    y: getVerticalCenterY(500, 24, 10),
+    size: 10,
+    font: regularFont,
+    align: "right",
+  });
+
+  // Row 2: Discount
+  drawThaiText(page, "ส่วนลด", {
+    x: 345,
+    y: getVerticalCenterY(524, 24, 9),
+    size: 9,
+    font: regularFont,
+    color: rgb(0.44, 0.44, 0.42),
+  });
+  drawThaiText(page, note.discount > 0 ? note.discount.toFixed(2) : "-", {
+    x: 545.28,
+    y: getVerticalCenterY(524, 24, 10),
+    size: 10,
+    font: regularFont,
+    align: "right",
+  });
+
+  // Row 3: Post-discount subtotal
+  drawThaiText(page, "ยอดหลังหักส่วนลด", {
+    x: 345,
+    y: getVerticalCenterY(548, 24, 9),
+    size: 9,
+    font: regularFont,
+    color: rgb(0.44, 0.44, 0.42),
+  });
+  drawThaiText(page, (note.totalAmount - note.discount).toFixed(2), {
+    x: 545.28,
+    y: getVerticalCenterY(548, 24, 10),
+    size: 10,
+    font: regularFont,
+    align: "right",
+  });
+
+  // Row 4: Net Total Value with Soft Beige background
+  page.drawRectangle({
+    x: 335.5,
+    y: convertY(595.5),
+    width: 219.28,
+    height: 23,
+    color: rgb(0.98, 0.98, 0.97),
+  });
+  page.drawLine({
+    start: { x: 335, y: convertY(596) },
+    end: { x: 555.28, y: convertY(596) },
+    thickness: 0.75,
+    color: stoneMainBorderColor,
+  });
+
+  drawThaiText(page, "ยอดสุทธิ", {
+    x: 345,
+    y: getVerticalCenterY(572, 24, 11),
+    size: 11,
+    font: boldFont,
+  });
+
+  const netText = note.netAmount.toFixed(2);
+  const netTextY = getVerticalCenterY(572, 24, 12);
+  drawThaiText(page, netText, {
+    x: 545.28,
+    y: netTextY,
+    size: 12,
+    font: boldFont,
+    align: "right",
+  });
+
+  // Final underlining structure
+  const valWidth = boldFont.widthOfTextAtSize(netText, 12);
+  page.drawLine({ start: { x: 545.28 - valWidth, y: netTextY - 2 }, end: { x: 545.28, y: netTextY - 2 }, thickness: 0.75, color: rgb(0.09, 0.09, 0.09) });
+  page.drawLine({ start: { x: 545.28 - valWidth, y: netTextY - 4 }, end: { x: 545.28, y: netTextY - 4 }, thickness: 0.75, color: rgb(0.09, 0.09, 0.09) });
+
+  // --- REMARKS UNDER TABLE ---
+  let remarksY = 614;
+  drawThaiText(page, "หมายเหตุ: ", {
+    x: 40,
+    y: convertY(remarksY),
+    size: 10,
+    font: boldFont,
+    color: rgb(0.16, 0.15, 0.14),
+  });
+
+  const remarksLines = (note.remarks || "ส่งของเรียบร้อยแล้ว\nฝากขาย").split("\n");
+  remarksLines.forEach((line) => {
+    drawThaiText(page, line, {
+      x: 92,
+      y: convertY(remarksY),
+      size: 10,
+      font: regularFont,
+      color: rgb(0.34, 0.33, 0.31),
+    });
+    remarksY += 15;
+  });
+
+  // --- FOOTER BOXES AND SIGNATURE STAMP OVERLAYS ---
+  const footerTopY = 672;
+  const footerHeight = 120;
+  const footerBottomY = footerTopY + footerHeight;
+
+  // 1. Recipient Box (Left)
+  page.drawRectangle({
+    x: 40,
+    y: convertY(footerBottomY),
+    width: 240,
+    height: footerHeight,
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  drawThaiText(page, "ผู้รับสินค้า", {
+    x: 140,
+    y: convertY(footerTopY + 16),
+    size: 11,
+    font: boldFont,
+    align: "center",
+  });
+
+  page.drawLine({
+    start: { x: 60, y: convertY(footerTopY + 70) },
+    end: { x: 220, y: convertY(footerTopY + 70) },
+    thickness: 0.5,
+    color: stoneLightDividerColor,
+    dashArray: [3, 3],
+  });
+
+  drawThaiText(page, "(........................................................)", {
+    x: 140,
+    y: convertY(footerTopY + 86),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.47, 0.44, 0.42),
+    align: "center",
+  });
+
+  drawThaiText(page, "วันที่ ......./......./.......", {
+    x: 140,
+    y: convertY(footerTopY + 104),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.47, 0.44, 0.42),
+    align: "center",
+  });
+
+  // 2. Sender Box (Right) with Overlapping Stamp and Handwritten Signature
+  page.drawRectangle({
+    x: 295.28,
+    y: convertY(footerBottomY),
+    width: 260,
+    height: footerHeight,
+    borderColor: stoneMainBorderColor,
+    borderWidth: 0.75,
+  });
+
+  drawThaiText(page, "ผู้ส่งสินค้า", {
+    x: 425.28,
+    y: convertY(footerTopY + 16),
+    size: 11,
+    font: boldFont,
+    align: "center",
+  });
+
+  // SIGNATURE OVERLAY (Centered in the upper center of Sender Box context)
+  try {
+    const signatureUrl = getAssetUrl("signature.png");
+    const sigBytes = await fetchImageBytes(signatureUrl);
+    const sigImg = await pdfDoc.embedPng(sigBytes);
+    const { width: sOrigW, height: sOrigH } = sigImg.scale(1);
+    
+    const maxSigW = 160;
+    const maxSigH = 42;
+    const sigScale = Math.min(maxSigW / sOrigW, maxSigH / sOrigH);
+    const sW = sOrigW * sigScale;
+    const sH = sOrigH * sigScale;
+
+    // Centered at X = 425.28, Y around footerTopY + 48
+    page.drawImage(sigImg, {
+      x: 425.28 - sW / 2,
+      y: convertY(footerTopY + 48 + sH / 2),
+      width: sW,
+      height: sH,
+    });
+  } catch (err) {
+    console.warn("Skipped signature overlay on PDF:", err);
+  }
+
+  // Printed Rep Name
+  drawThaiText(page, `(..... ${REPRESENTATIVE_NAME} .....)`, {
+    x: 425.28,
+    y: convertY(footerTopY + 86),
+    size: 10,
+    font: boldFont,
+    align: "center",
+  });
+
+  // Date Label
+  drawThaiText(page, "วันที่ ......./......./.......", {
+    x: 425.28,
+    y: convertY(footerTopY + 104),
+    size: 10,
+    font: regularFont,
+    color: rgb(0.47, 0.44, 0.42),
+    align: "center",
+  });
+
+  // COMPANY STAMP ROTATE & SCALE OVERLAY (Slightly overlapping on right/bottom)
+  try {
+    const stampUrl = getAssetUrl("company-stamp.png");
+    const stampBytes = await fetchImageBytes(stampUrl);
+    const stampImg = await pdfDoc.embedPng(stampBytes);
+    const { width: stOrigW, height: stOrigH } = stampImg.scale(1);
+
+    const maxStampW = 90;
+    const maxStampH = 90;
+    const stampScale = Math.min(maxStampW / stOrigW, maxStampH / stOrigH);
+    const stW = stOrigW * stampScale;
+    const stH = stOrigH * stampScale;
+
+    // Right aligned with borders
+    const stampX = 555.28 - stW - 12;
+    const stampY = convertY(footerBottomY - 10);
+
+    page.drawImage(stampImg, {
+      x: stampX,
+      y: stampY,
+      width: stW,
+      height: stH,
+      opacity: 0.85,
+    });
+  } catch (err) {
+    console.warn("Skipped stamp overlay on PDF:", err);
+  }
+
+  // 3. Output raw generated PDF binaries
+  return await pdfDoc.save();
 }

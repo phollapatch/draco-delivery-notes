@@ -20,7 +20,7 @@ import Settings from "./components/Settings";
 import PrintPreview from "./components/PrintPreview";
 
 // Icons
-import { LayoutDashboard, FileSpreadsheet, History, Settings2, Sparkles, CheckCircle2, Download, Printer, Share2, ArrowLeft } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, History, Settings2, Sparkles, CheckCircle2, Download, Printer, Share2, ArrowLeft, Plus } from "lucide-react";
 
 type TabId = "dashboard" | "create" | "history" | "settings";
 
@@ -37,6 +37,7 @@ export default function App() {
   // Workflow post-generation Success state
   const [generatedSuccessNote, setGeneratedSuccessNote] = useState<DeliveryNote | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [formKey, setFormKey] = useState(0);
 
   // Initialize data stores
   useEffect(() => {
@@ -176,7 +177,7 @@ export default function App() {
       <nav className="bg-stone-950/80 border-b border-stone-900 backdrop-blur sticky top-16 z-35 select-none py-2 px-4 print:hidden">
         <div className="mx-auto max-w-7xl flex items-center justify-start overflow-x-auto gap-2 no-scrollbar">
           <button
-            onClick={() => { setActiveTab("create"); setGeneratedSuccessNote(null); }}
+            onClick={() => { setActiveTab("create"); setGeneratedSuccessNote(null); setFormKey(prev => prev + 1); }}
             className={`cursor-pointer px-4.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm tracking-wide shrink-0 transition flex items-center gap-2 ${
               activeTab === "create"
                 ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/10"
@@ -233,7 +234,7 @@ export default function App() {
         
         {/* POST-GENERATION FAST-WORKFLOW PANEL DISPLAY */}
         {generatedSuccessNote && (
-          <div className="bg-stone-900 border-2 border-amber-500/40 p-6 rounded-3xl shadow-2xl mb-8 border-dashed flex flex-col md:flex-row justify-between items-center gap-6 print:hidden animate-fade-in text-left">
+          <div className="bg-stone-900 border-2 border-amber-500/40 p-6 rounded-3xl shadow-2xl mb-8 border-dashed flex flex-col xl:flex-row justify-between items-center gap-6 print:hidden animate-fade-in text-left">
             <div className="space-y-2 flex-grow">
               <div className="flex items-center gap-2.5 text-emerald-400">
                 <CheckCircle2 className="w-6.5 h-6.5" />
@@ -248,7 +249,7 @@ export default function App() {
             </div>
 
             {/* Quick Action options right there inside checkout flow */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full md:w-auto shrink-0">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full xl:w-auto shrink-0">
               <button
                 onClick={() => setActivePrintNote(generatedSuccessNote)}
                 className="px-5 py-3.5 bg-amber-500 text-stone-950 font-black rounded-2xl cursor-pointer hover:bg-amber-400 flex items-center justify-center gap-2 transition whitespace-nowrap"
@@ -267,6 +268,15 @@ export default function App() {
               >
                 <Share2 className="w-4.5 h-4.5" /> ส่งออกLINE/แชร์
               </button>
+              <button
+                onClick={() => {
+                  setGeneratedSuccessNote(null);
+                  setFormKey(prev => prev + 1);
+                }}
+                className="px-5 py-3.5 bg-emerald-500 text-stone-950 font-black rounded-2xl cursor-pointer hover:bg-emerald-400 flex items-center justify-center gap-2 transition whitespace-nowrap"
+              >
+                <Plus className="w-4.5 h-4.5" /> ออกใบส่งใบใหม่
+              </button>
             </div>
           </div>
         )}
@@ -275,6 +285,7 @@ export default function App() {
         <section className={`transition-opacity duration-200 ${isGeneratingPdf ? "opacity-30 pointer-events-none" : "opacity-100"}`}>
           {activeTab === "create" && (
             <CreateNote
+              key={formKey}
               customers={customers}
               products={products}
               onGenerate={handleGenerateDeliveryNote}
