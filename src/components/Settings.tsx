@@ -645,12 +645,12 @@ export default function Settings({
         </h3>
         <div className="text-xs text-stone-400 space-y-2 leading-relaxed">
           <p>
-            ระบบนี้พร้อมพาร์ทิชันคอมไพล์สำหรับจัดส่งผ่าน <strong>Cloudflare Pages</strong> ร่วมกับ <strong>Cloudflare R2 Bucket</strong> แบบ Real-time!
+            ระบบนี้รองรับการรันแบบ Client-Side เต็มรูปแบบ เหมาะสำหรับการโฮสต์ผ่าน <strong>Cloudflare Pages Free Plan</strong> โดยไม่ต้องเชื่องโยงฐานข้อมูลภายนอกหรือ R2 Bucket!
           </p>
           <ul className="list-disc pl-5 space-y-1 font-mono text-[11px] text-stone-500">
-            <li>โมเดลวิศวกรรมฝั่งเซิร์ฟเวอร์รวบรวมภายใน: <code>/functions/api/upload-pdf.ts</code></li>
-            <li>แฟ้มสเปกสารสนเทศสำหรับคอมไไพล์: <code>wrangler.toml</code></li>
-            <li>วิธีการ: รันคำสั่ง <code>npm run build</code> แล้วทำการ <code>npx wrangler pages deploy dist</code></li>
+            <li>โมเดลการประมวลผลและการจัดทำ PDF: ประมวลผลบนเบราเซอร์ต้นทาง (100% Client-Side PDF Generation)</li>
+            <li>รันคำสั่งคอมไพล์: <code>npm run build</code></li>
+            <li>วิธีการติดตั้ง: ลากโฟลเดอร์ <code>dist</code> วางในหน้าบริการ Cloudflare Pages ได้ทันที</li>
           </ul>
         </div>
       </div>

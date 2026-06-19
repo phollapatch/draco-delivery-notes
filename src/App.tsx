@@ -10,7 +10,7 @@ import {
   deleteNote 
 } from "./utils/db";
 import { generateDeliveryNotePdf } from "./utils/pdfGenerator";
-import { uploadPdfToR2, downloadPdfBytes } from "./utils/r2Storage";
+import { storePdfLocally, downloadPdfBytes } from "./utils/pdfStorage";
 
 // Component imports
 import Dashboard from "./components/Dashboard";
@@ -85,8 +85,8 @@ export default function App() {
       // 1. Generate Binary PDF bytes using pdf-lib
       const pdfBytes = await generateDeliveryNotePdf(newNote);
 
-      // 2. Upload to Cloudflare R2 or persistent local store
-      const finalPdfUrl = await uploadPdfToR2(newNote.documentNo, pdfBytes);
+      // 2. Save to local browser state and cache
+      const finalPdfUrl = await storePdfLocally(newNote.documentNo, pdfBytes);
 
       // 3. Complete model: inject correct storage URL and save
       const compiledNote = {
