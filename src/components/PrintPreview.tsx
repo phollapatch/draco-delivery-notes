@@ -253,10 +253,10 @@ export default function PrintPreview({ note, onClose }: PrintPreviewProps) {
 
           {/* Remarks display under calculated box */}
           <div className="text-left mt-4 text-sm max-w-lg mb-8">
-            <span className="font-bold text-stone-800">หมายเหตุ: </span>
-            <span className="text-stone-600 font-medium whitespace-pre-line leading-relaxed">
+            <div className="font-bold text-stone-800">หมายเหตุ:</div>
+            <div className="text-stone-600 font-medium whitespace-pre-line leading-relaxed pl-4">
               {note.remarks || "ส่งของเรียบร้อยแล้ว\nฝากขาย"}
-            </span>
+            </div>
           </div>
         </div>
 
@@ -297,7 +297,7 @@ export default function PrintPreview({ note, onClose }: PrintPreviewProps) {
 
             {/* COMPANY RUBBER BLUE STAMP OVERLAY (Stamped BELOW the name on the right side) */}
             <div className="absolute right-2 bottom-1 pointer-events-none z-20 flex items-center justify-center">
-              <div className="w-36 h-12 opacity-85 rotate-[4deg]">
+              <div className="w-36 h-12 opacity-85 -rotate-[20deg] transform translate-x-[30px] -translate-y-1">
                 <img 
                   src={getAssetUrl("company-stamp.png")} 
                   alt="Company Stamp" 

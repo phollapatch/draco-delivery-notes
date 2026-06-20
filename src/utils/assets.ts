@@ -1,27 +1,24 @@
 export const REPRESENTATIVE_NAME = "นายพลภัทร ชีช้าง";
 
-const presenceCache: Record<string, boolean> = {};
-
-if (typeof window !== "undefined") {
-  // Restore from sessionStorage if exists to ensure immediate synchronous availability across loads
-  ["logo.png", "signature.png", "company-stamp.png"].forEach((filename) => {
-    const cached = sessionStorage.getItem("presence_" + filename);
-    if (cached !== null) {
-      presenceCache[filename] = cached === "true";
-    } else {
-      // Otherwise, perform async HEAD check
-      fetch(`/assets/${filename}`, { method: "HEAD" })
-        .then((res) => {
-          const ok = res.ok;
-          presenceCache[filename] = ok;
-          sessionStorage.setItem("presence_" + filename, String(ok));
-        })
-        .catch(() => {
-          presenceCache[filename] = false;
-          sessionStorage.setItem("presence_" + filename, "false");
-        });
+export function getConfiguredAsset(type: "logo" | "stamp" | "signature"): string {
+  const filename = type === "logo" ? "logo.png" : type === "stamp" ? "company-stamp.png" : "signature.png";
+  const localKey = "real_" + filename.replace(".", "_");
+  
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem(localKey);
+    if (stored) {
+      return stored;
     }
-  });
+  }
+  
+  return `/assets/${filename}`;
+}
+
+export function getAssetUrl(filename: string): string {
+  if (filename === "logo.png") return getConfiguredAsset("logo");
+  if (filename === "company-stamp.png") return getConfiguredAsset("stamp");
+  if (filename === "signature.png") return getConfiguredAsset("signature");
+  return `/assets/${filename}`;
 }
 
 function drawCircularText(
@@ -200,38 +197,6 @@ function renderStampToPng(): string {
   ctx.fill();
 
   return canvas.toDataURL("image/png");
-}
-
-export function getAssetUrl(filename: string): string {
-  const localKey = "real_" + filename.replace(".", "_");
-  
-  if (typeof window !== "undefined") {
-    // 1. Check if there is an uploaded override in localStorage
-    const stored = localStorage.getItem(localKey);
-    if (stored) {
-      return stored;
-    }
-    
-    // 2. Check if the server has the physical file in /assets/... and return it directly!
-    if (presenceCache[filename] === true) {
-      return `/assets/${filename}`;
-    }
-  }
-  
-  // 3. Return gorgeous pre-compiled raster fallbacks ONLY if no physical file in /assets/
-  if (filename === "logo.png") {
-    return renderLogoToPng();
-  }
-  
-  if (filename === "signature.png") {
-    return renderSignatureToPng();
-  }
-  
-  if (filename === "company-stamp.png") {
-    return renderStampToPng();
-  }
-  
-  return `/assets/${filename}`;
 }
 
 

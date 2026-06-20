@@ -159,36 +159,92 @@ const DEFAULT_NOTES: DeliveryNote[] = [
 
 export function getCustomers(): Customer[] {
   const store = localStorage.getItem(CUSTOMERS_KEY);
+  let list: Customer[] = [];
   if (!store) {
+    list = DEFAULT_CUSTOMERS;
     localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(DEFAULT_CUSTOMERS));
-    return DEFAULT_CUSTOMERS;
+  } else {
+    try {
+      list = JSON.parse(store);
+    } catch (e) {
+      list = DEFAULT_CUSTOMERS;
+    }
   }
-  try {
-    return JSON.parse(store);
-  } catch (e) {
-    return DEFAULT_CUSTOMERS;
+
+  const seenIds = new Set<string>();
+  let dirty = false;
+  const cleaned = list.map((item, idx) => {
+    let cleanId = item.id ? String(item.id).trim() : `CUST-AUTO-${idx}`;
+    if (!cleanId || seenIds.has(cleanId)) {
+      cleanId = `CUST-AUTO-${idx}-${Date.now()}`;
+      dirty = true;
+    }
+    seenIds.add(cleanId);
+    return { ...item, id: cleanId };
+  });
+
+  if (dirty) {
+    localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(cleaned));
   }
+  return cleaned;
 }
 
 export function saveCustomers(customers: Customer[]) {
-  localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(customers));
+  const seenIds = new Set<string>();
+  const cleaned = customers.map((item, idx) => {
+    let cleanId = item.id ? String(item.id).trim() : `CUST-AUTO-${idx}`;
+    if (!cleanId || seenIds.has(cleanId)) {
+      cleanId = `CUST-AUTO-${idx}-${Date.now()}`;
+    }
+    seenIds.add(cleanId);
+    return { ...item, id: cleanId };
+  });
+  localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(cleaned));
 }
 
 export function getProducts(): Product[] {
   const store = localStorage.getItem(PRODUCTS_KEY);
+  let list: Product[] = [];
   if (!store) {
+    list = DEFAULT_PRODUCTS;
     localStorage.setItem(PRODUCTS_KEY, JSON.stringify(DEFAULT_PRODUCTS));
-    return DEFAULT_PRODUCTS;
+  } else {
+    try {
+      list = JSON.parse(store);
+    } catch (e) {
+      list = DEFAULT_PRODUCTS;
+    }
   }
-  try {
-    return JSON.parse(store);
-  } catch (e) {
-    return DEFAULT_PRODUCTS;
+
+  const seenIds = new Set<string>();
+  let dirty = false;
+  const cleaned = list.map((item, idx) => {
+    let cleanId = item.id ? String(item.id).trim() : `PROD-AUTO-${idx}`;
+    if (!cleanId || seenIds.has(cleanId)) {
+      cleanId = `PROD-AUTO-${idx}-${Date.now()}`;
+      dirty = true;
+    }
+    seenIds.add(cleanId);
+    return { ...item, id: cleanId };
+  });
+
+  if (dirty) {
+    localStorage.setItem(PRODUCTS_KEY, JSON.stringify(cleaned));
   }
+  return cleaned;
 }
 
 export function saveProducts(products: Product[]) {
-  localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+  const seenIds = new Set<string>();
+  const cleaned = products.map((item, idx) => {
+    let cleanId = item.id ? String(item.id).trim() : `PROD-AUTO-${idx}`;
+    if (!cleanId || seenIds.has(cleanId)) {
+      cleanId = `PROD-AUTO-${idx}-${Date.now()}`;
+    }
+    seenIds.add(cleanId);
+    return { ...item, id: cleanId };
+  });
+  localStorage.setItem(PRODUCTS_KEY, JSON.stringify(cleaned));
 }
 
 export function getNotes(): DeliveryNote[] {

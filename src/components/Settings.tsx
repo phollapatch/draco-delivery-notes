@@ -64,7 +64,8 @@ export default function Settings({
 
     try {
       const response = await fetch(`/assets/${filename}`, { method: "HEAD" });
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.toLowerCase().includes("image")) {
         setStatus("workspace");
         setPreview(`/assets/${filename}`);
       } else {

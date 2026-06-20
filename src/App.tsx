@@ -9,8 +9,6 @@ import {
   saveNote, 
   deleteNote 
 } from "./utils/db";
-import { generateDeliveryNotePdf } from "./utils/pdfGenerator";
-import { storePdfLocally, downloadPdfBytes } from "./utils/pdfStorage";
 
 // Component imports
 import Dashboard from "./components/Dashboard";
@@ -18,6 +16,7 @@ import CreateNote from "./components/CreateNote";
 import HistoryList from "./components/HistoryList";
 import Settings from "./components/Settings";
 import PrintPreview from "./components/PrintPreview";
+import DeliveryNotePrintScreen from "./components/DeliveryNotePrintScreen";
 
 // Icons
 import { LayoutDashboard, FileSpreadsheet, History, Settings2, Sparkles, CheckCircle2, Download, Printer, Share2, ArrowLeft, Plus } from "lucide-react";
@@ -28,6 +27,7 @@ export default function App() {
   // Navigation & View States
   const [activeTab, setActiveTab] = useState<TabId>("create"); // Default to Create to hit the <30s target!
   const [activePrintNote, setActivePrintNote] = useState<DeliveryNote | null>(null);
+  const [currentPath, setCurrentPath] = useState(window.location.pathname + window.location.hash);
 
   // Core Data Lists State
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -41,6 +41,68 @@ export default function App() {
 
   // Initialize data stores
   useEffect(() => {
+    // 0. Bypassing browser container storage partitioning by syncing from window.opener or hash query import parameters
+    try {
+      if (typeof window !== "undefined" && window.opener) {
+        try {
+          const openerStorage = window.opener.localStorage;
+          if (openerStorage) {
+            const keysToSync = [
+              "draco_customers",
+              "draco_products",
+              "draco_notes",
+              "real_logo_png",
+              "real_signature_png",
+              "real_company-stamp_png"
+            ];
+            keysToSync.forEach(key => {
+              const val = openerStorage.getItem(key);
+              if (val !== null) {
+                localStorage.setItem(key, val);
+              }
+            });
+            console.log("Successfully synchronized localState from window.opener container.");
+          }
+        } catch (e) {
+          console.warn("window.opener synchronization skipped:", e);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed opener sync checker:", e);
+    }
+
+    try {
+      const hash = window.location.hash;
+      if (hash.includes("import=")) {
+        const parts = hash.split("import=");
+        const importData = parts[1]?.split("&")[0]?.split("?")[0];
+        if (importData) {
+          const decoded = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(importData)))));
+          if (decoded && decoded.documentNo) {
+            saveNote(decoded);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("URL query custom note import failed:", e);
+    }
+
+    // Clear old image status caches from sessionStorage to re-trigger corrected content-type validation
+    try {
+      sessionStorage.removeItem("presence_logo.png");
+      sessionStorage.removeItem("presence_signature.png");
+      sessionStorage.removeItem("presence_company-stamp.png");
+    } catch (e) {
+      console.warn("sessionStorage clear error", e);
+    }
+
+    // Sync browser back-forward and pathname/hash navigation
+    const handleLocationChange = () => {
+      setCurrentPath(window.location.pathname + window.location.hash);
+    };
+    window.addEventListener("popstate", handleLocationChange);
+    window.addEventListener("hashchange", handleLocationChange);
+
     // Clean up bloated legacy PDF base64 entries in localStorage to restore 100% storage quota instantly
     try {
       const keysToRemove: string[] = [];
@@ -58,7 +120,30 @@ export default function App() {
     setCustomers(getCustomers());
     setProducts(getProducts());
     setNotes(getNotes());
+
+    return () => {
+      window.removeEventListener("popstate", handleLocationChange);
+      window.removeEventListener("hashchange", handleLocationChange);
+    };
   }, []);
+
+  // Navigation pushState router helpers
+  const navigateToPrint = (docNo: string) => {
+    const slug = docNo.replace(/\//g, "-");
+    window.location.hash = `/delivery-note/print/${slug}`;
+    setCurrentPath(window.location.pathname + window.location.hash);
+  };
+
+  const handleBackFromPrint = () => {
+    window.location.hash = "";
+    try {
+      window.history.pushState(null, "", window.location.pathname);
+    } catch (e) {
+      console.warn("pushState error", e);
+    }
+    setCurrentPath(window.location.pathname);
+    setActiveTab("history"); // Land on history list for instant access
+  };
 
   // Update lists and save back to persistence
   const handleUpdateCustomers = (updatedCusts: Customer[]) => {
@@ -83,23 +168,15 @@ export default function App() {
     setIsGeneratingPdf(true);
     setGeneratedSuccessNote(null);
     try {
-      // 1. Generate Binary PDF bytes using pdf-lib
-      const pdfBytes = await generateDeliveryNotePdf(newNote);
-
-      // 2. Save to local browser state and cache
-      const finalPdfUrl = await storePdfLocally(newNote.documentNo, pdfBytes);
-
-      // 3. Complete model: inject correct storage URL and save
-      const compiledNote = {
-        ...newNote,
-        pdfUrl: finalPdfUrl
-      };
-
-      saveNote(compiledNote);
+      // 1. Save note to database
+      saveNote(newNote);
       setNotes(getNotes()); // Refresh lists
 
-      // 4. Reveal immediate action sucess screen
-      setGeneratedSuccessNote(compiledNote);
+      // 2. Clear sucess indicator since we navigate immediately
+      setGeneratedSuccessNote(null);
+
+      // 3. Directly navigate user to print route format
+      navigateToPrint(newNote.documentNo);
     } catch (err: any) {
       console.error(err);
       alert(`การออกใบส่งสินค้าเกิดข้อผิดพลาด: ${err.message}`);
@@ -113,17 +190,9 @@ export default function App() {
     setNotes(getNotes()); // Refresh lists
   };
 
-  // Immediate Download PDF action
-  const handleDownloadNote = async (note: DeliveryNote) => {
-    setIsGeneratingPdf(true);
-    try {
-      const bytes = await generateDeliveryNotePdf(note);
-      downloadPdfBytes(note.documentNo, bytes);
-    } catch (e: any) {
-      alert(`ดาวน์โหลดล้มเหลว: ${e.message}`);
-    } finally {
-      setIsGeneratingPdf(false);
-    }
+  // Click View / Print / Download points directly to print preview screen!
+  const handleDownloadNote = (note: DeliveryNote) => {
+    navigateToPrint(note.documentNo);
   };
 
   // Trigger web sharing / modal fallback 
@@ -143,6 +212,34 @@ export default function App() {
       alert(`คัดลอกข้อความและลิงก์แชร์สำหรับคุณเรียบร้อย:\n\n${shareText}`);
     }
   };
+
+  // Render routing interceptor for print screen
+  let matchedNoteForPrint: DeliveryNote | null = null;
+  const decodedPath = decodeURIComponent(currentPath);
+  if (decodedPath.includes("/delivery-note/print/")) {
+    const segments = decodedPath.split("/delivery-note/print/");
+    const slug = segments[1]?.split("?")[0]?.trim();
+    if (slug) {
+      const normalizedSlug = slug.replace(/[-_]/g, "/").toLowerCase();
+      const match = notes.find(n => 
+        n.documentNo.toLowerCase() === slug.toLowerCase() ||
+        n.documentNo.toLowerCase().replace(/[-_]/g, "/") === normalizedSlug
+      );
+      if (match) {
+        matchedNoteForPrint = match;
+      }
+    }
+  }
+
+  if (matchedNoteForPrint) {
+    return (
+      <DeliveryNotePrintScreen 
+        note={matchedNoteForPrint} 
+        onBack={handleBackFromPrint} 
+        onShare={() => handleShareNote(matchedNoteForPrint!)} 
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans selection:bg-amber-500 selection:text-stone-950">
@@ -251,7 +348,7 @@ export default function App() {
             {/* Quick Action options right there inside checkout flow */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full xl:w-auto shrink-0">
               <button
-                onClick={() => setActivePrintNote(generatedSuccessNote)}
+                onClick={() => navigateToPrint(generatedSuccessNote.documentNo)}
                 className="px-5 py-3.5 bg-amber-500 text-stone-950 font-black rounded-2xl cursor-pointer hover:bg-amber-400 flex items-center justify-center gap-2 transition whitespace-nowrap"
               >
                 <Printer className="w-4.5 h-4.5" /> สั่งพิมพ์ใบนี้
@@ -295,7 +392,7 @@ export default function App() {
           {activeTab === "history" && (
             <HistoryList
               notes={notes}
-              onViewNote={(note) => setActivePrintNote(note)}
+              onViewNote={(note) => navigateToPrint(note.documentNo)}
               onDownloadNote={handleDownloadNote}
               onShareNote={handleShareNote}
               onDeleteNote={handleDeleteNote}
@@ -307,7 +404,7 @@ export default function App() {
               notes={notes}
               customers={customers}
               products={products}
-              onViewNote={(note) => setActivePrintNote(note)}
+              onViewNote={(note) => navigateToPrint(note.documentNo)}
               onDownloadNote={handleDownloadNote}
               onShareNote={handleShareNote}
               onNavigateToCreate={() => setActiveTab("create")}
