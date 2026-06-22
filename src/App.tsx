@@ -17,11 +17,13 @@ import HistoryList from "./components/HistoryList";
 import Settings from "./components/Settings";
 import PrintPreview from "./components/PrintPreview";
 import DeliveryNotePrintScreen from "./components/DeliveryNotePrintScreen";
+import CustomerManagement from "./components/CustomerManagement";
+import ProductManagement from "./components/ProductManagement";
 
 // Icons
-import { LayoutDashboard, FileSpreadsheet, History, Settings2, Sparkles, CheckCircle2, Download, Printer, Share2, ArrowLeft, Plus } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, History, Settings2, Sparkles, CheckCircle2, Download, Printer, Share2, ArrowLeft, Plus, Users, Package } from "lucide-react";
 
-type TabId = "dashboard" | "create" | "history" | "settings";
+type TabId = "dashboard" | "create" | "history" | "settings" | "customers" | "products";
 
 export default function App() {
   // Navigation & View States
@@ -316,6 +318,28 @@ export default function App() {
           >
             <Settings2 className="w-4 h-4" /> นำเข้า Excel / หลังบ้าน
           </button>
+
+          <button
+            onClick={() => { setActiveTab("customers"); setGeneratedSuccessNote(null); }}
+            className={`cursor-pointer px-4.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm tracking-wide shrink-0 transition flex items-center gap-2 ${
+              activeTab === "customers"
+                ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/10"
+                : "text-stone-400 hover:text-white"
+            }`}
+          >
+            <Users className="w-4 h-4" /> จัดการลูกค้า
+          </button>
+
+          <button
+            onClick={() => { setActiveTab("products"); setGeneratedSuccessNote(null); }}
+            className={`cursor-pointer px-4.5 py-2.5 rounded-xl font-bold text-xs sm:text-sm tracking-wide shrink-0 transition flex items-center gap-2 ${
+              activeTab === "products"
+                ? "bg-amber-500 text-stone-950 shadow-md shadow-amber-500/10"
+                : "text-stone-400 hover:text-white"
+            }`}
+          >
+            <Package className="w-4 h-4" /> จัดการสินค้า
+          </button>
         </div>
       </nav>
 
@@ -419,6 +443,20 @@ export default function App() {
               onUpdateCustomers={handleUpdateCustomers}
               onUpdateProducts={handleUpdateProducts}
               onResetDatabase={handleResetDatabase}
+            />
+          )}
+
+          {activeTab === "customers" && (
+            <CustomerManagement
+              customers={customers}
+              onUpdateCustomers={handleUpdateCustomers}
+            />
+          )}
+
+          {activeTab === "products" && (
+            <ProductManagement
+              products={products}
+              onUpdateProducts={handleUpdateProducts}
             />
           )}
         </section>
